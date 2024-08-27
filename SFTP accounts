@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Function to generate a random password
+generate_password() {
+    local password_length=12
+    # Generate a random password with 12 characters (adjust as needed)
+    tr -dc 'A-Za-z0-9_!@#$%^&*()' < /dev/urandom | head -c ${password_length}
+}
+
+# Check if the script is run as root
+if [ "$(id -u)" -ne "0" ]; then
+    echo "This script must be run as root." >&2
+    exit 1
+fi
+
+# Check if the username is provided
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <username>" >&2
+    exit 1
+fi
+
+USERNAME="$1"
+PASSWORD=$(generate_password)
+
+# Check if the user already exists
+if id "$USERNAME" &>/dev/null; then
+    echo "User $USERNAME already exists." >&2
+    exit 1
+fi
+
+# Create the user with a random password
+useradd -m -s /sbin/nologin "$USERNAME"
+echo "$USERNAME:$PASSWORD" | chpasswd
+
+# Force password change on first login
+chage -d 0 "$USERNAME"
+
+# Set up SFTP-only access
+# Create or modify the SSH configuration file
+SSHD_CONFIG="/etc/ssh/sshd_config"
+
+if ! grep -q "Match User $USERNAME" "$SSHD_CONFIG"; then
+    echo "Match User $USERNAME" >> "$SSHD_CONFIG"
+    echo "    ForceCommand internal-sftp" >> "$SSHD_CONFIG"
+    echo "    ChrootDirectory /home/$USERNAME" >> "$SSHD_CONFIG"
+    echo "    AllowTcpForwarding no" >> "$SSHD_CONFIG"
+    echo "    X11Forwarding no" >> "$SSHD_CONFIG"
+fi
+
+# Restart SSH service to apply changes
+systemctl restart sshd
+
+# Output the created user details
+echo "SFTP-only account created:"
+echo "Username: $USERNAME"
+echo "Password: $PASSWORD"
+echo "The user must change their password upon first login."
